@@ -28,19 +28,24 @@ Step 1 and Step 5 are similar to the method proposed by Laszlo et al.(2016) whic
 # Cite
 Please use the following bibtex, when you refer to this project.
 
-    @unpublished{kkpc2020,
-        title = {PaScaL_TDMA: A library of parallel and scalable solvers for massive tridiagonal system},
-        author = {Kim, Kiha and Kang, Ji-Hoon and Pan, Xiaomin and Choi, Jung-Il},
-        note = {under review}
+    @article{kkpc2020,
+        title = "PaScaL_TDMA: A library of parallel and scalable solvers for massive tridiagonal system",
+        author = "Kim, Kiha and Kang, Ji-Hoon and Pan, Xiaomin and Choi, Jung-Il",
+        journal = "Computer Physics Communications",
+        volume = "260",
+        pages = "107722",
+        year = "2021",
+        issn = "0010-4655",
+        doi = "https://doi.org/10.1016/j.cpc.2020.107722"
     }
 
     @misc{PaScaL_TDMA2019,
-        title  = {Parallel and Scalable Library for TriDiagonal Matrix Algorithm},
-        author = {Kim, Kiha and Kang, Ji-Hoon and Choi, Jung-Il},
-        url    = https://github.com/MPMC-Lab/PaScaL_TDMA},
-        year   = {2019}
+        title  = "Parallel and Scalable Library for TriDiagonal Matrix Algorithm",
+        author = "Kim, Kiha and Kang, Ji-Hoon and Choi, Jung-Il",
+        url    = "https://github.com/MPMC-Lab/PaScaL_TDMA",
+        year   = "2019"
     }
 
 
 # References
-For more information, please the reference paper (in preparation) and [Multi-Physics Modeling and Computation Lab.](https://www.mpmc.yonsei.ac.kr/)
+For more information, please the reference paper and [Multi-Physics Modeling and Computation Lab.](https://www.mpmc.yonsei.ac.kr/)
