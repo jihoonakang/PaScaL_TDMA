@@ -210,3 +210,130 @@ subroutine tdma_cycl_many(a, b, c, d, n1, n2)
     deallocate(e,rr)
 
 end subroutine tdma_cycl_many
+
+!>
+!> @brief       Solve many tridiagonal systems of equations using the Thomas algorithm.
+!>              First index indicates the number of independent many tridiagonal systems to use vectorization.
+!>              Second index indicates the row number in the tridiagonal system .
+!> @param       a       Coefficient array in lower diagonal elements
+!> @param       b       Coefficient array in diagonal elements
+!> @param       c       Coefficient array in upper diagonal elements
+!> @param       d       Coefficient array in the right-hand side terms
+!> @param       n1      Number of tridiagonal systems per process
+!> @param       n2      Number of rows in each process, size of the tridiagonal matrix N divided by nprocs
+!>
+subroutine tdma_many_thread_team(a, b, c, d, n1, n2, nthds)
+
+    use omp_lib
+
+    implicit none
+
+    integer, intent(in) :: n1,n2,nthds
+    double precision, intent(inout) :: a(n1,n2,nthds), b(n1,n2,nthds), c(n1,n2,nthds), d(n1,n2,nthds)
+    
+    integer :: i,j,ti
+    double precision, allocatable, dimension(:) :: r
+
+!$omp parallel default(shared) private(ti,i,j) private(r)
+    allocate(r(1:n1))
+!$omp do 
+    do ti=1,nthds
+        do i=1,n1
+            d(i,1,ti)=d(i,1,ti)/b(i,1,ti)
+            c(i,1,ti)=c(i,1,ti)/b(i,1,ti)
+        enddo
+
+        do j=2,n2
+            do i=1,n1
+                r(i)=1.d0/(b(i,j,ti)-a(i,j,ti)*c(i,j-1,ti))
+                d(i,j,ti)=r(i)*(d(i,j,ti)-a(i,j,ti)*d(i,j-1,ti))
+                c(i,j,ti)=r(i)*c(i,j,ti)
+            enddo
+        enddo
+
+        do j=n2-1,1,-1
+            do i=1,n1
+                d(i,j,ti)=d(i,j,ti)-c(i,j,ti)*d(i,j+1,ti)
+            enddo
+        enddo
+        ! print *, '[TDMA]',ti, omp_get_thread_num(), omp_get_num_threads(), omp_get_max_threads()
+    enddo
+!$omp end do
+    deallocate(r)
+!$omp end parallel
+
+end subroutine tdma_many_thread_team
+
+!>
+!> @brief       Solve many cyclic tridiagonal systems of equations using the Thomas algorithm.
+!>              First index indicates the number of independent many tridiagonal systems to use vectorization.
+!>              Second index indicates the row number in the tridiagonal system.
+!> @param       a       Coefficient array in lower diagonal elements
+!> @param       b       Coefficient array in diagonal elements
+!> @param       c       Coefficient array in upper diagonal elements
+!> @param       d       Coefficient array in the right-hand side terms
+!> @param       n1      Number of tridiagonal systems per process
+!> @param       n2      Number of rows in each process, size of the tridiagonal matrix N divided by nprocs
+!>
+subroutine tdma_cycl_many_thread_team(a, b, c, d, n1, n2, nthds)
+
+    use omp_lib
+
+    implicit none
+
+    integer, intent(in) :: n1,n2,nthds
+    double precision, intent(inout) :: a(n1,n2,nthds), b(n1,n2,nthds), c(n1,n2,nthds), d(n1,n2,nthds)
+    
+    integer :: i,j,ti
+    double precision, allocatable, dimension(:,:) :: e
+    double precision, allocatable, dimension(:) :: rr
+
+
+!$omp parallel default(shared) private(ti,i,j) private(e, rr)
+    allocate(e(1:n1,1:n2),rr(1:n1))
+!$omp do 
+    do ti=1,nthds
+        do i=1,n1
+            e(i,:)=0.0d0
+            e(i,2) = -a(i,2 ,ti)
+            e(i,n2) = -c(i,n2,ti)
+        enddo
+
+        do i=1,n1
+            d(i,2,ti)=d(i,2,ti)/b(i,2,ti)
+            e(i,2)   =e(i,2)   /b(i,2,ti)
+            c(i,2,ti)=c(i,2,ti)/b(i,2,ti)
+        enddo
+
+        do j=3,n2
+            do i=1,n1
+                rr(i)=1.d0/(b(i,j,ti)-a(i,j,ti)*c(i,j-1,ti))
+                d(i,j,ti)=rr(i)*(d(i,j,ti)-a(i,j,ti)*d(i,j-1,ti))
+                e(i,j)=rr(i)*(e(i,j)-a(i,j,ti)*e(i,j-1))
+                c(i,j,ti)=rr(i)*c(i,j,ti)
+            enddo
+        enddo
+
+        do j=n2-1,2,-1
+            do i=1,n1
+                d(i,j,ti)=d(i,j,ti)-c(i,j,ti)*d(i,j+1,ti)
+                e(i,j)=e(i,j)-c(i,j,ti)*e(i,j+1)
+            enddo
+        enddo
+
+        do i=1,n1
+            d(i,1,ti)=(d(i,1,ti)-a(i,1,ti)*d(i,n2,ti)-c(i,1,ti)*d(i,2,ti))/(b(i,1,ti)+a(i,1,ti)*e(i,n2)+c(i,1,ti)*e(i,2))
+        enddo
+
+        do j = 2,n2
+            do i=1,n1
+                d(i,j,ti) = d(i,j,ti) + d(i,1,ti)*e(i,j)
+            enddo
+        enddo
+        ! print *, '[TDMA]',ti, omp_get_thread_num(), omp_get_num_threads(), omp_get_max_threads()
+    end do
+!$omp end do
+    deallocate(e,rr)
+!$omp end parallel
+
+end subroutine tdma_cycl_many_thread_team

@@ -87,7 +87,7 @@ program main
         t_curr = t_curr + dt
         if(myrank==0) write(*,*) '[Main] Current time step = ', time_step
     
-        call solve_theta_plan_many(theta_sub)
+        call solve_theta_plan_many_thread_team(theta_sub)
  
     end do
     if(myrank==0) write(*,*) '[Main] Solving the 3D heat equation complete! '
