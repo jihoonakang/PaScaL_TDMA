@@ -1,0 +1,98 @@
+module tdma
+
+contains
+    !>
+    !> @brief       Solve many tridiagonal systems of equations using the Thomas algorithm.
+    !>              First index indicates the number of independent many tridiagonal systems to use vectorization.
+    !>              Second index indicates the row number in the tridiagonal system .
+    !> @param       a       Coefficient array in lower diagonal elements
+    !> @param       b       Coefficient array in diagonal elements
+    !> @param       c       Coefficient array in upper diagonal elements
+    !> @param       d       Coefficient array in the right-hand side terms
+    !> @param       n1      Number of rows in each process, size of the tridiagonal matrix N divided by nprocs
+    !>
+    attributes(global) subroutine tdma_many_cuda(a, b, c, d, n1)
+
+        implicit none
+
+        integer, value, intent(in)      :: n1
+        double precision, intent(inout) :: a(:,:,:), b(:,:,:), c(:,:,:), d(:,:,:)
+        
+        integer :: i, j, k
+        double precision :: r
+
+        j = (blockidx%x-1) * blockdim%x + threadidx%x
+        k = (blockidx%y-1) * blockdim%y + threadidx%y
+
+        d(1,j,k)=d(1,j,k)/b(1,j,k)
+        c(1,j,k)=c(1,j,k)/b(1,j,k)
+
+        do i=2,n1
+            r=1.d0/(b(i,j,k)-a(i,j,k)*c(i-1,j,k))
+            d(i,j,k)=r*(d(i,j,k)-a(i,j,k)*d(i-1,j,k))
+            c(i,j,k)=r*c(i,j,k)
+        enddo
+
+        do i=n1-1,1,-1
+            d(i,j,k)=d(i,j,k)-c(i,j,k)*d(i+1,j,k)
+        enddo
+
+    end subroutine tdma_many_cuda
+
+
+
+    !>
+    !> @brief       Solve many cyclic tridiagonal systems of equations using the Thomas algorithm.
+    !>              First index indicates the number of independent many tridiagonal systems to use vectorization.
+    !>              Second index indicates the row number in the tridiagonal system.
+    !> @param       a       Coefficient array in lower diagonal elements
+    !> @param       b       Coefficient array in diagonal elements
+    !> @param       c       Coefficient array in upper diagonal elements
+    !> @param       d       Coefficient array in the right-hand side terms
+    !> @param       n1      Number of rows in each process, size of the tridiagonal matrix N divided by nprocs
+    !>
+    attributes(global) subroutine tdma_cycl_many_cuda(a, b, c, d, n1)
+
+        implicit none
+
+        integer, value, intent(in)      :: n1
+        double precision, intent(inout) :: a(:,:,:), b(:,:,:), c(:,:,:), d(:,:,:)
+        
+        integer :: i, j, k
+        double precision :: e(1:n1)
+        double precision :: r
+
+        j = (blockidx%x-1) * blockdim%x + threadidx%x
+        k = (blockidx%y-1) * blockdim%y + threadidx%y
+
+        do i=1,n1
+            e(i)  = 0.0d0
+        enddo
+        e(2)  = -a(2,j,k)
+        e(n1) = -c(n1,j,k)
+
+        d(2,j,k) = d(2,j,k) / b(2,j,k)
+        e(2)     = e(2)     / b(2,j,k)
+        c(2,j,k) = c(2,j,k) / b(2,j,k)
+
+        do i=3,n1
+            r       = 1.d0/(b(i,j,k)-a(i,j,k)*c(i-1,j,k))
+            d(i,j,k)= r*(d(i,j,k)-a(i,j,k)*d(i-1,j,k))
+            e(i)    = r*(e(i)-a(i,j,k)*e(i-1))
+            c(i,j,k)= r*c(i,j,k)
+        enddo
+
+        do i=n1-1,2,-1
+            d(i,j,k) = d(i,j,k)-c(i,j,k)*d(i+1,j,k)
+            e(i)     = e(i)-c(i,j,k)*e(i+1)
+        enddo
+
+        d(1,j,k) = (d(1,j,k)-a(1,j,k)*d(n1,j,k)-c(1,j,k)*d(2,j,k))/(b(1,j,k)+a(1,j,k)*e(n1)+c(1,j,k)*e(2))
+
+        do i=2,n1
+            d(i,j,k) = d(i,j,k) + d(1,j,k)*e(i)
+        enddo
+
+    end subroutine tdma_cycl_many_cuda
+
+end module tdma

@@ -5,9 +5,9 @@ nz = 64
 /
 
 &procs
-npx = 1
-npy = 1
-npz = 1
+npx = 2
+npy = 2
+npz = 4
 /
 
 &time

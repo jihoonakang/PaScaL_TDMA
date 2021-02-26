@@ -97,6 +97,7 @@ subroutine tdma_cycl_single(a, b, c, d, n1)
     end do
 
     deallocate(e)
+    
 end subroutine tdma_cycl_single
 
 !>
