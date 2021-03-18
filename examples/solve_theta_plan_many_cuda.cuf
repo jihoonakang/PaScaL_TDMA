@@ -59,7 +59,12 @@ subroutine solve_theta_plan_many_cuda(theta)
 
     double precision, allocatable, dimension(:, :, :) :: rhs            ! r.h.s. array
     double precision, allocatable, dimension(:, :, :) :: apt, amt, act, adt    ! Coefficient of tridiagonal matrix
-    double precision, allocatable, device, dimension(:,:,:) :: ap_d, am_d, ac_d, ad_d ! Coefficient of tridiagonal matrix
+
+    double precision, allocatable, device, dimension(:, :, :)   :: theta_d, rhs_d            ! r.h.s. array
+    double precision, allocatable, device, dimension(:,:,:)     :: ap_d, am_d, ac_d, ad_d ! Coefficient of tridiagonal matrix
+    double precision, device :: dmz_sub_d(0:nz_sub), dmy_sub_d(0:ny_sub), dmx_sub_d(0:nx_sub)
+    double precision, device :: thetaBC3_sub_d(0:nx_sub, 0:nz_sub), thetaBC4_sub_d(0:nx_sub, 0:nz_sub)
+    integer, device :: jpbc_index_d(0:ny_sub), jmbc_index_d(0:ny_sub)
 
     type(ptdma_plan_many_cuda) :: px_many, pz_many , py_many  ! Plan for many tridiagonal systems of equations
 
@@ -82,9 +87,21 @@ subroutine solve_theta_plan_many_cuda(theta)
         stop
     endif
 
-    ! Calculating r.h.s.
-    allocate( rhs(0:nx_sub, 0:ny_sub, 0:nz_sub))
+    dmx_sub_d = dmx_sub
+    dmy_sub_d = dmy_sub
+    dmz_sub_d = dmz_sub
+    jpbc_index_d = jpbc_index
+    jmbc_index_d = jmbc_index
+    thetaBC3_sub_d = thetaBC3_sub
+    thetaBC4_sub_d = thetaBC4_sub
 
+    ! Calculating r.h.s.
+    allocate( rhs_d(nx_sub-1, ny_sub-1, nz_sub-1))
+    allocate( theta_d(0:nx_sub, 0:ny_sub, 0:nz_sub))
+
+    theta_d = theta
+
+!$cuf kernel do <<< *, * >>>
     do k = 1, nz_sub-1
         kp = k+1
         km = k-1
@@ -92,20 +109,20 @@ subroutine solve_theta_plan_many_cuda(theta)
         do j = 1, ny_sub-1
             jp = j + 1
             jm = j - 1
-            jep = jpbc_index(j)
-            jem = jmbc_index(j)
+            jep = jpbc_index_d(j)
+            jem = jmbc_index_d(j)
 
             do i = 1, nx_sub-1
                 ip = i+1
                 im = i-1
 
                 ! Diffusion term
-                dedx1 = (  theta(i ,j ,k ) - theta(im,j ,k )  )/dmx_sub(i )
-                dedx2 = (  theta(ip,j ,k ) - theta(i ,j ,k )  )/dmx_sub(ip)  
-                dedy3 = (  theta(i ,j ,k ) - theta(i ,jm,k )  ) /dmy_sub(j )
-                dedy4 = (  theta(i ,jp,k ) - theta(i ,j ,k )  ) /dmy_sub(jp)
-                dedz5 = (  theta(i ,j ,k ) - theta(i ,j ,km)  )/dmz_sub(k )
-                dedz6 = (  theta(i ,j ,kp) - theta(i ,j ,k )  )/dmz_sub(kp)
+                dedx1 = (  theta_d(i ,j ,k ) - theta_d(im,j ,k )  )/dmx_sub_d(i )
+                dedx2 = (  theta_d(ip,j ,k ) - theta_d(i ,j ,k )  )/dmx_sub_d(ip)  
+                dedy3 = (  theta_d(i ,j ,k ) - theta_d(i ,jm,k )  ) /dmy_sub_d(j )
+                dedy4 = (  theta_d(i ,jp,k ) - theta_d(i ,j ,k )  ) /dmy_sub_d(jp)
+                dedz5 = (  theta_d(i ,j ,k ) - theta_d(i ,j ,km)  )/dmz_sub_d(k )
+                dedz6 = (  theta_d(i ,j ,kp) - theta_d(i ,j ,k )  )/dmz_sub_d(kp)
 
                 viscous_e1 = 1.d0/dx*(dedx2 - dedx1)
                 viscous_e2 = 1.d0/dy*(dedy4 - dedy3)
@@ -113,78 +130,73 @@ subroutine solve_theta_plan_many_cuda(theta)
                 viscous = 0.5d0*Ct*(viscous_e1 + viscous_e2 + viscous_e3) 
                 
                 ! Boundary treatment for the y-direction only
-                ebc_down = 0.5d0*Ct/dy/dmy_sub(j)*thetaBC3_sub(i,k)
-                ebc_up = 0.5d0*Ct/dy/dmy_sub(jp)*thetaBC4_sub(i,k)
-                ebc = dble(1. - jem)*ebc_down + dble(1. - jep)*ebc_up
+                ebc_down = 0.5d0*Ct/dy/dmy_sub_d(j)*thetaBC3_sub_d(i,k)
+                ebc_up = 0.5d0*Ct/dy/dmy_sub_d(jp)*thetaBC4_sub_d(i,k)
+                ebc = dble(1.0d0 - jem)*ebc_down + dble(1. - jep)*ebc_up
 
                 ! Diffusion term from incremental notation in next time step: x-direction
-                eAPI = -0.5d0*Ct/dx/dmx_sub(ip)
-                eAMI = -0.5d0*Ct/dx/dmx_sub(i )
-                eACI =  0.5d0*Ct/dx*( 1.d0/dmx_sub(ip) + 1.d0/dmx_sub(i) )
+                eAPI = -0.5d0*Ct/dx/dmx_sub_d(ip)
+                eAMI = -0.5d0*Ct/dx/dmx_sub_d(i )
+                eACI =  0.5d0*Ct/dx*( 1.d0/dmx_sub_d(ip) + 1.d0/dmx_sub_d(i) )
 
                 ! Diffusion term from incremental notation in next time step: z-direction
-                eAPK = -0.5d0*Ct/dz/dmz_sub(kp)
-                eAMK = -0.5d0*Ct/dz/dmz_sub(k )
-                eACK =  0.5d0*Ct/dz*( 1.d0/dmz_sub(kp) + 1.d0/dmz_sub(k) )
+                eAPK = -0.5d0*Ct/dz/dmz_sub_d(kp)
+                eAMK = -0.5d0*Ct/dz/dmz_sub_d(k )
+                eACK =  0.5d0*Ct/dz*( 1.d0/dmz_sub_d(kp) + 1.d0/dmz_sub_d(k) )
 
                 ! Diffusion term from incremental notation in next time step: y-direction
-                eAPJ = -0.5d0*Ct/dy*( 1.d0/dmy_sub(jp) )*dble(jep)
-                eAMJ = -0.5d0*Ct/dy*( 1.d0/dmy_sub(j ) )*dble(jem)
-                eACJ =  0.5d0*Ct/dy*( 1.d0/dmy_sub(jp) + 1.d0/dmy_sub(j) )
+                eAPJ = -0.5d0*Ct/dy*( 1.d0/dmy_sub_d(jp) )*dble(jep)
+                eAMJ = -0.5d0*Ct/dy*( 1.d0/dmy_sub_d(j ) )*dble(jem)
+                eACJ =  0.5d0*Ct/dy*( 1.d0/dmy_sub_d(jp) + 1.d0/dmy_sub_d(j) )
                 
-                eRHS = eAPK*theta(i,j,kp) + eACK*theta(i,j,k) + eAMK*theta(i,j,km)      &
-                    & + eAPJ*theta(i,jp,k) + eACJ*theta(i,j,k) + eAMJ*theta(i,jm,k)      &
-                    & + eAPI*theta(ip,j,k) + eACI*theta(i,j,k) + eAMI*theta(im,j,k)
+                eRHS = eAPK*theta_d(i,j,kp) + eACK*theta_d(i,j,k) + eAMK*theta_d(i,j,km)      &
+                    & + eAPJ*theta_d(i,jp,k) + eACJ*theta_d(i,j,k) + eAMJ*theta_d(i,jm,k)      &
+                    & + eAPI*theta_d(ip,j,k) + eACI*theta_d(i,j,k) + eAMI*theta_d(im,j,k)
 
                 ! r.h.s. term 
-                rhs(i,j,k) = theta(i,j,k)/dt + viscous + ebc      &
-                          & - (theta(i,j,k)/dt + eRHS)
+                rhs_d(i,j,k) = theta_d(i,j,k)/dt + viscous + ebc      &
+                          & - (theta_d(i,j,k)/dt + eRHS)
             enddo
         enddo
         ! print '(a10,x,4(i5,x))', '[RHS-Team]', k, omp_get_thread_num(), omp_get_num_threads(), omp_get_max_threads()
     enddo
 
     ! solve in the z-direction.
-    allocate( apt(1:nz_sub-1, 1:nx_sub-1, 1:ny_sub-1), amt(1:nz_sub-1, 1:nx_sub-1, 1:ny_sub-1), &
-              act(1:nz_sub-1, 1:nx_sub-1, 1:ny_sub-1), adt(1:nz_sub-1, 1:nx_sub-1, 1:ny_sub-1) )
-
     allocate( ap_d(1:nz_sub-1, 1:nx_sub-1, 1:ny_sub-1), am_d(1:nz_sub-1, 1:nx_sub-1, 1:ny_sub-1), &
               ac_d(1:nz_sub-1, 1:nx_sub-1, 1:ny_sub-1), ad_d(1:nz_sub-1, 1:nx_sub-1, 1:ny_sub-1) )
 
     ! Create a PaScaL_TDMA plan for the tridiagonal systems.
     call PaScaL_TDMA_plan_many_create_cuda(pz_many, nx_sub-1, nz_sub-1, ny_sub-1, comm_1d_z%myrank, comm_1d_z%nprocs, comm_1d_z%mpi_comm)
 
-    ! Build a coefficient matrix for the tridiagonal systems into a 2D array.
+    ! rhs_d = rhs
+
+    ! Build a coefficient matrix for the tridiagonal systems into a 2D array with GPU.
+!$cuf kernel do <<< *, * >>>
     do j = 1, ny_sub-1
         do k = 1, nz_sub-1
             kp = k+1
             do i = 1, nx_sub-1
-                apt(k,i,j) = -0.5d0*Ct/dz/dmz_sub(kp)*dt
-                amt(k,i,j) = -0.5d0*Ct/dz/dmz_sub(k )*dt
-                act(k,i,j) =  0.5d0*Ct/dz*( 1.d0/dmz_sub(kp) + 1.d0/dmz_sub(k) )*dt + 1.d0
-                adt(k,i,j) = rhs(i,j,k)*dt
+                ap_d(k,i,j) = -0.5d0*Ct/dz/dmz_sub_d(kp)*dt
+                am_d(k,i,j) = -0.5d0*Ct/dz/dmz_sub_d(k )*dt
+                ac_d(k,i,j) =  0.5d0*Ct/dz*( 1.d0/dmz_sub_d(kp) + 1.d0/dmz_sub_d(k) )*dt + 1.d0
+                ad_d(k,i,j) = rhs_d(i,j,k)*dt
             enddo
         enddo
     enddo
 
     !Solve the tridiagonal systems under the defined plan with periodic boundary conditions.
-    ap_d = apt
-    ac_d = act
-    am_d = amt
-    ad_d = adt
     call PaScaL_TDMA_many_solve_cycle_cuda(pz_many, am_d, ac_d, ap_d, ad_d, nx_sub-1, nz_sub-1, ny_sub-1)
-    adt = ad_d
 
     ! Return the solution to the r.h.s. plane-by-plane
+!$cuf kernel do <<< *, * >>>
     do j = 1, ny_sub-1
         do k = 1, nz_sub-1
-            rhs(1:nx_sub-1,j,k)=adt(k,1:nx_sub-1,j)
+            rhs_d(1:nx_sub-1,j,k)=ad_d(k,1:nx_sub-1,j)
         enddo
     enddo
 
     ! Destroy the PaScaL_TDMA plan for the tridiagonal systems.
     call PaScaL_TDMA_plan_many_destroy_cuda(pz_many,comm_1d_z%nprocs)
-    deallocate( apt, amt, act, adt )
     deallocate( ap_d, am_d, ac_d, ad_d )
 
     ! solve in the y-direction.
@@ -198,47 +210,40 @@ subroutine solve_theta_plan_many_cuda(theta)
     call PaScaL_TDMA_plan_many_create_cuda(py_many, nx_sub-1, ny_sub-1, nz_sub-1, comm_1d_y%myrank, comm_1d_y%nprocs, comm_1d_y%mpi_comm)
 
     ! Build a coefficient matrix for the tridiagonal systems into a 2D array.
+!$cuf kernel do <<< *, * >>>
     do k = 1, nz_sub-1
         do j = 1, ny_sub-1
             jp = j + 1
             jm = j - 1
-            jep = jpbc_index(j)
-            jem = jmbc_index(j)
+            jep = jpbc_index_d(j)
+            jem = jmbc_index_d(j)
             
             do i = 1, nx_sub-1
-                apt(j,i,k) = -0.5d0*Ct/dy/dmy_sub(jp)*dble(jep)*dt
-                amt(j,i,k) = -0.5d0*Ct/dy/dmy_sub(j )*dble(jem)*dt
-                act(j,i,k) =  0.5d0*Ct/dy*( 1.d0/dmy_sub(jp) + 1.d0/dmy_sub(j) )*dt + 1.d0
-                adt(j,i,k) = rhs(i,j,k)
+                ap_d(j,i,k) = -0.5d0*Ct/dy/dmy_sub_d(jp)*dble(jep)*dt
+                am_d(j,i,k) = -0.5d0*Ct/dy/dmy_sub_d(j )*dble(jem)*dt
+                ac_d(j,i,k) =  0.5d0*Ct/dy*( 1.d0/dmy_sub_d(jp) + 1.d0/dmy_sub_d(j) )*dt + 1.d0
+                ad_d(j,i,k) = rhs_d(i,j,k)
             end do
         end do
     end do
 
     ! Solve the tridiagonal systems under the defined plan.
-    ap_d = apt
-    ac_d = act
-    am_d = amt
-    ad_d = adt
     call PaScaL_TDMA_many_solve_cuda(py_many, am_d, ac_d, ap_d, ad_d, nx_sub-1, ny_sub-1, nz_sub-1)
-    adt = ad_d
 
     ! Return the solution to the r.h.s. plane-by-plane.
+!$cuf kernel do <<< *, * >>>
     do k = 1, nz_sub-1
         do j = 1, ny_sub-1
             do i = 1, nx_sub-1
-                rhs(i,j,k)=adt(j,i,k)
+                rhs_d(i,j,k)=ad_d(j,i,k)
             enddo
         enddo
     end do
 
     call PaScaL_TDMA_plan_many_destroy_cuda(py_many,comm_1d_y%nprocs)
-    deallocate( apt, amt, act, adt )
     deallocate( ap_d, am_d, ac_d, ad_d )
 
     ! solve in the x-direction.
-    allocate( apt(1:nx_sub-1, 1:ny_sub-1, 1:nz_sub-1), amt(1:nx_sub-1, 1:ny_sub-1, 1:nz_sub-1), &
-              act(1:nx_sub-1, 1:ny_sub-1, 1:nz_sub-1), adt(1:nx_sub-1, 1:ny_sub-1, 1:nz_sub-1) )
-
     allocate( ap_d(1:nx_sub-1, 1:ny_sub-1, 1:nz_sub-1), am_d(1:nx_sub-1, 1:ny_sub-1, 1:nz_sub-1), &
               ac_d(1:nx_sub-1, 1:ny_sub-1, 1:nz_sub-1), ad_d(1:nx_sub-1, 1:ny_sub-1, 1:nz_sub-1) )
 
@@ -246,40 +251,39 @@ subroutine solve_theta_plan_many_cuda(theta)
     call PaScaL_TDMA_plan_many_create_cuda(px_many, ny_sub-1, nx_sub-1, nz_sub-1, comm_1d_x%myrank, comm_1d_x%nprocs, comm_1d_x%mpi_comm)
 
     ! Build a coefficient matrix for the tridiagonal systems into a 2D array.
+!$cuf kernel do <<< *, * >>>
     do k = 1, nz_sub-1
         do j = 1, ny_sub-1
             do i = 1, nx_sub-1
                 ip = i+1
                 im = i-1
 
-                apt(i,j,k) = -0.5d0*Ct/dx/dmx_sub(ip)*dt
-                amt(i,j,k) = -0.5d0*Ct/dx/dmx_sub(i )*dt
-                act(i,j,k) =  0.5d0*Ct/dx*( 1.d0/dmx_sub(ip) + 1.d0/dmx_sub(i) )*dt + 1.d0
-                adt(i,j,k) = rhs(i,j,k)
+                ap_d(i,j,k) = -0.5d0*Ct/dx/dmx_sub_d(ip)*dt
+                am_d(i,j,k) = -0.5d0*Ct/dx/dmx_sub_d(i )*dt
+                ac_d(i,j,k) =  0.5d0*Ct/dx*( 1.d0/dmx_sub_d(ip) + 1.d0/dmx_sub_d(i) )*dt + 1.d0
+                ad_d(i,j,k) = rhs_d(i,j,k)
             enddo
         enddo
     enddo
+
     ! Solve the tridiagonal systems under the defined plan with periodic boundary conditions.
-    ap_d = apt
-    ac_d = act
-    am_d = amt
-    ad_d = adt
     call PaScaL_TDMA_many_solve_cycle_cuda(px_many, am_d, ac_d, ap_d, ad_d, ny_sub-1, nx_sub-1, nz_sub-1)
-    adt = ad_d
 
     ! Return the solution to theta plane-by-plane.
+!$cuf kernel do <<< *, * >>>
     do k = 1, nz_sub-1
         do j = 1, ny_sub-1
-            theta(1:nx_sub-1,j,k) = theta(1:nx_sub-1,j,k) + adt(1:nx_sub-1,j,k)
+            theta_d(1:nx_sub-1,j,k) = theta_d(1:nx_sub-1,j,k) + ad_d(1:nx_sub-1,j,k)
         enddo
     enddo
 
+    theta = theta_d
+
     call PaScaL_TDMA_plan_many_destroy_cuda(px_many,comm_1d_x%nprocs)
 
-    deallocate( apt, amt, act, adt )
     deallocate( ap_d, am_d, ac_d, ad_d )
 
-    deallocate(rhs)
+    deallocate(rhs_d, theta_d)
 
     ! Update ghostcells from the solution.
     call mpi_subdomain_ghostcell_update(theta, comm_1d_x, comm_1d_y, comm_1d_z)

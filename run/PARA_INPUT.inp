@@ -6,7 +6,7 @@ nz = 64
 
 &procs
 npx = 2
-npy = 2
+npy = 4
 npz = 4
 /
 
