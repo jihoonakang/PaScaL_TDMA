@@ -15,8 +15,9 @@ contains
 
         implicit none
 
-        integer, value, intent(in)      :: n1
-        double precision, intent(inout) :: a(:,:,:), b(:,:,:), c(:,:,:), d(:,:,:)
+        integer, value, intent(in)              :: n1
+        double precision, device, intent(in)    :: a(:,:,:), b(:,:,:)
+        double precision, device, intent(inout) :: c(:,:,:), d(:,:,:)
         
         integer :: i, j, k
         double precision :: r
@@ -55,9 +56,10 @@ contains
 
         implicit none
 
-        integer, value, intent(in)      :: n1
-        double precision, intent(inout) :: a(:,:,:), b(:,:,:), c(:,:,:), d(:,:,:)
-        
+        integer, value, intent(in)              :: n1
+        double precision, device, intent(in)    :: a(:,:,:), b(:,:,:)
+        double precision, device, intent(inout) :: c(:,:,:), d(:,:,:)
+
         integer :: i, j, k
         double precision :: e(1:n1)
         double precision :: r

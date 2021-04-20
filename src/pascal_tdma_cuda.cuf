@@ -59,7 +59,6 @@ module PaScaL_TDMA_cuda
 
     use mpi
     use omp_lib
-    use tdma
     use cudafor
 
     implicit none
@@ -95,6 +94,9 @@ module PaScaL_TDMA_cuda
     end type ptdma_plan_many_cuda
 
     private
+
+    integer, parameter :: thread_in_x = 16, thread_in_y = 16
+    integer :: block_in_x, block_rt_in_x, block_in_y
 
     public  :: PaScaL_TDMA_plan_many_create_cuda
     public  :: PaScaL_TDMA_plan_many_destroy_cuda
@@ -252,12 +254,8 @@ module PaScaL_TDMA_cuda
         double precision :: r
         type(dim3) :: blocks, threads
 
-        ! double precision, allocatable, device, dimension(:,:,:) :: a_d, b_d, c_d, d_d
         double precision, allocatable, device, dimension(:,:,:) :: a_rd_d, b_rd_d, c_rd_d, d_rd_d
         double precision, allocatable, device, dimension(:,:,:) :: a_rt_d, b_rt_d, c_rt_d, d_rt_d
-
-        ! allocate(a_d(n_row, n_sys, n_blk), b_d(n_row, n_sys, n_blk))
-        ! allocate(c_d(n_row, n_sys, n_blk), d_d(n_row, n_sys, n_blk))
 
         allocate(a_rd_d(2, n_sys, n_blk), b_rd_d(2, n_sys, n_blk))
         allocate(c_rd_d(2, n_sys, n_blk), d_rd_d(2, n_sys, n_blk))
@@ -268,14 +266,32 @@ module PaScaL_TDMA_cuda
         allocate(a_rt_d(n_row_rt, n_sys_rt, n_blk), b_rt_d(n_row_rt, n_sys_rt, n_blk))
         allocate(c_rt_d(n_row_rt, n_sys_rt, n_blk), d_rt_d(n_row_rt, n_sys_rt, n_blk))
 
-        ! a_d = A
-        ! b_d = B
-        ! c_d = C
-        ! d_d = D
+        ! Setting the thread and block
+        block_in_x = n_sys/thread_in_x
+        if(block_in_x.eq.0 .or. mod(n_sys, thread_in_x)) then
+            print '(a,i5,a,i5)', '[Error] n_sys should be a multiple of thread_in_x. thread_in_x = ',thread_in_x,', n_sys = ',n_sys
+            call MPI_Finalize(ierr)
+            stop
+        endif
+
+        block_rt_in_x = n_sys_rt/thread_in_x
+        if(block_rt_in_x.eq.0 .or. mod(n_sys_rt, thread_in_x)) then
+            print '(a,i5,a,i5)', '[Error] n_sys_rt should be a multiple of thread_in_x. thread_in_x = ',thread_in_x,', n_sys_rt = ',n_sys_rt
+            call MPI_Finalize(ierr)
+            stop
+        endif
+
+        block_in_y = n_blk/thread_in_y
+        if(block_in_y.eq.0 .or. mod(n_blk, thread_in_y)) then
+            print '(a,i5,a,i5)', '[Error] n_blk should be a multiple of thread_in_y. thread_in_y = ',thread_in_y,', n_blk = ',n_blk
+            call MPI_Finalize(ierr)
+            stop
+        endif
+
+        threads = dim3(thread_in_x, thread_in_y, 1)
+        blocks  = dim3(block_in_x, block_in_y, 1)
 
         ! The modified Thomas algorithm
-        threads = dim3(n_sys, n_blk/2, 1)
-        blocks  = dim3(1, 2, 1)
         call PaScaL_TDMA_many_modified_Thomas_cuda<<<blocks, threads>>>(a_d, b_d, c_d, d_d, a_rd_d, b_rd_d, c_rd_d, d_rd_d, n_row)
 
         ! Transpose the reduced systems of equations for TDMA using MPI_Ialltoallw and DDTs.
@@ -305,8 +321,9 @@ module PaScaL_TDMA_cuda
         d_rt_d = plan%D_rt
 
         ! Solve the reduced tridiagonal systems of equations using Thomas algorithm.
-        threads = dim3(n_sys_rt, n_blk/2, 1)
-        blocks  = dim3(1, 2, 1)
+        threads = dim3(thread_in_x, thread_in_y, 1)
+        blocks  = dim3(block_rt_in_x, block_in_y, 1)
+
         call tdma_many_cuda<<<blocks, threads>>>(a_rt_d,b_rt_d,c_rt_d,d_rt_d, n_row_rt)
 
         ! Transpose the obtained solutions to original reduced forms using MPI_Ialltoallw and DDTs.
@@ -318,12 +335,10 @@ module PaScaL_TDMA_cuda
         d_rd_d = plan%D_rd
 
         ! Update solutions of the modified tridiagonal system with the solutions of the reduced tridiagonal system.
-        threads = dim3(n_sys, n_blk/2, 1)
-        blocks  = dim3(1, 2, 1)
+        threads = dim3(thread_in_x, thread_in_y, 1)
+        blocks  = dim3(block_in_x, block_in_y, 1)
         call PaScaL_TDMA_many_update_solution_cuda<<<blocks, threads>>>(a_d, c_d, d_d, d_rd_d, n_row)
-        ! D = d_d
 
-        ! deallocate(a_d, b_d, c_d, d_d)
         deallocate(a_rd_d, b_rd_d, c_rd_d, d_rd_d)
         deallocate(a_rt_d, b_rt_d, c_rt_d, d_rt_d)
 
@@ -361,9 +376,6 @@ module PaScaL_TDMA_cuda
         double precision, allocatable, device, dimension(:,:,:) :: a_rd_d, b_rd_d, c_rd_d, d_rd_d
         double precision, allocatable, device, dimension(:,:,:) :: a_rt_d, b_rt_d, c_rt_d, d_rt_d
 
-        ! allocate(a_d(n_row, n_sys, n_blk), b_d(n_row, n_sys, n_blk))
-        ! allocate(c_d(n_row, n_sys, n_blk), d_d(n_row, n_sys, n_blk))
-
         allocate(a_rd_d(2, n_sys, n_blk), b_rd_d(2, n_sys, n_blk))
         allocate(c_rd_d(2, n_sys, n_blk), d_rd_d(2, n_sys, n_blk))
 
@@ -373,14 +385,32 @@ module PaScaL_TDMA_cuda
         allocate(a_rt_d(n_row_rt, n_sys_rt, n_blk), b_rt_d(n_row_rt, n_sys_rt, n_blk))
         allocate(c_rt_d(n_row_rt, n_sys_rt, n_blk), d_rt_d(n_row_rt, n_sys_rt, n_blk))
 
-        ! a_d = A
-        ! b_d = B
-        ! c_d = C
-        ! d_d = D
+        ! Setting the thread and block
+        block_in_x = n_sys/thread_in_x
+        if(block_in_x.eq.0 .or. mod(n_sys, thread_in_x)) then
+            print '(a,i5,a,i5)', '[Error] n_sys should be a multiple of thread_in_x. thread_in_x = ',thread_in_x,', n_sys = ',n_sys
+            call MPI_Finalize(ierr)
+            stop
+        endif
+
+        block_rt_in_x = n_sys_rt/thread_in_x
+        if(block_rt_in_x.eq.0 .or. mod(n_sys_rt, thread_in_x)) then
+            print '(a,i5,a,i5)', '[Error] n_sys_rt should be a multiple of thread_in_x. thread_in_x = ',thread_in_x,', n_sys_rt = ',n_sys_rt
+            call MPI_Finalize(ierr)
+            stop
+        endif
+
+        block_in_y = n_blk/thread_in_y
+        if(block_in_y.eq.0 .or. mod(n_blk, thread_in_y)) then
+            print '(a,i5,a,i5)', '[Error] n_blk should be a multiple of thread_in_y. thread_in_y = ',thread_in_y,', n_blk = ',n_blk
+            call MPI_Finalize(ierr)
+            stop
+        endif
+
+        threads = dim3(thread_in_x, thread_in_y, 1)
+        blocks  = dim3(block_in_x, block_in_y, 1)
 
         ! The modified Thomas algorithm
-        threads = dim3(n_sys, n_blk/2, 1)
-        blocks  = dim3(1, 2, 1)
         call PaScaL_TDMA_many_modified_Thomas_cuda<<<blocks, threads>>>(a_d, b_d, c_d, d_d, a_rd_d, b_rd_d, c_rd_d, d_rd_d, n_row)
 
         ! Transpose the reduced systems of equations for TDMA using MPI_Ialltoallw and DDTs.
@@ -409,9 +439,10 @@ module PaScaL_TDMA_cuda
         c_rt_d = plan%C_rt
         d_rt_d = plan%D_rt
 
+        threads = dim3(thread_in_x, thread_in_y, 1)
+        blocks  = dim3(block_rt_in_x, block_in_y, 1)
+
         ! Solve the reduced tridiagonal systems of equations using Thomas algorithm.
-        threads = dim3(n_sys_rt, n_blk/2, 1)
-        blocks  = dim3(1, 2, 1)
         call tdma_cycl_many_cuda<<<blocks, threads>>>(a_rt_d,b_rt_d,c_rt_d,d_rt_d, n_row_rt)
 
         ! Transpose the obtained solutions to original reduced forms using MPI_Ialltoallw and DDTs.
@@ -422,19 +453,15 @@ module PaScaL_TDMA_cuda
         call MPI_Waitall(1, request, MPI_STATUSES_IGNORE, ierr)
         d_rd_d = plan%D_rd
 
-        threads = dim3(n_sys, n_blk/2, 1)
-        blocks  = dim3(1, 2, 1)
+        threads = dim3(thread_in_x, thread_in_y, 1)
+        blocks  = dim3(block_in_x, block_in_y, 1)
         ! Update solutions of the modified tridiagonal system with the solutions of the reduced tridiagonal system.
         call PaScaL_TDMA_many_update_solution_cuda<<<blocks, threads>>>(a_d, c_d, d_d, d_rd_d, n_row)
-        ! D = d_d
 
-        ! deallocate(a_d, b_d, c_d, d_d)
         deallocate(a_rd_d, b_rd_d, c_rd_d, d_rd_d)
         deallocate(a_rt_d, b_rt_d, c_rt_d, d_rt_d)
 
     end subroutine PaScaL_TDMA_many_solve_cycle_cuda
-
-
 
     !>
     !> @brief   Modified Thomas algorithm
@@ -457,51 +484,125 @@ module PaScaL_TDMA_cuda
 
         ! Temporary variables for computation
         integer :: i, j, k
+        integer :: ti, tj, tk
         double precision :: r
 
+        ! Block shared memory
+        double precision, shared :: a1(thread_in_x, thread_in_y), a0(thread_in_x, thread_in_y)
+        double precision, shared :: b1(thread_in_x, thread_in_y), b0(thread_in_x, thread_in_y)
+        double precision, shared :: c1(thread_in_x, thread_in_y), c0(thread_in_x, thread_in_y)
+        double precision, shared :: d1(thread_in_x, thread_in_y), d0(thread_in_x, thread_in_y)
+        
         j = (blockidx%x-1) * blockdim%x + threadidx%x
         k = (blockidx%y-1) * blockdim%y + threadidx%y
+
+        tj = threadidx%x
+        tk = threadidx%y
 
         ! The modified Thomas algorithm : elimination of lower diagonal elements. 
         ! First index indicates a row number in a partitioned tridiagonal system .
         ! Second & Third index indicate a number of independent many tridiagonal systems for parallezation.
         ! The modified Thomas algorithm : elimination of lower diagonal elements. 
-        a(1,j,k) = a(1,j,k)/b(1,j,k)
-        d(1,j,k) = d(1,j,k)/b(1,j,k)
-        c(1,j,k) = c(1,j,k)/b(1,j,k)
 
-        a(2,j,k) = a(2,j,k)/b(2,j,k)
-        d(2,j,k) = d(2,j,k)/b(2,j,k)
-        c(2,j,k) = c(2,j,k)/b(2,j,k)
+        a0(tj,tk) = a(1,j,k)
+        b0(tj,tk) = b(1,j,k)
+        c0(tj,tk) = c(1,j,k)
+        d0(tj,tk) = d(1,j,k)
+
+        a0(tj,tk) = a0(tj,tk) / b0(tj,tk)
+        c0(tj,tk) = c0(tj,tk) / b0(tj,tk)
+        d0(tj,tk) = d0(tj,tk) / b0(tj,tk)
+
+        a(1,j,k) = a0(tj,tk)
+        c(1,j,k) = c0(tj,tk)
+        d(1,j,k) = d0(tj,tk)
+
+        a1(tj,tk) = a(2,j,k)
+        b1(tj,tk) = b(2,j,k)
+        c1(tj,tk) = c(2,j,k)
+        d1(tj,tk) = d(2,j,k)
+
+        a1(tj,tk) = a1(tj,tk) / b1(tj,tk)
+        c1(tj,tk) = c1(tj,tk) / b1(tj,tk)
+        d1(tj,tk) = d1(tj,tk) / b1(tj,tk)
+
+        a(2,j,k) = a1(tj,tk)
+        c(2,j,k) = c1(tj,tk)
+        d(2,j,k) = d1(tj,tk)
+
 
         do i=3, n_row
-            r    =    1.d0/(b(i,j,k)-a(i,j,k)*c(i-1,j,k))
-            d(i,j,k) =  r*(d(i,j,k)-a(i,j,k)*d(i-1,j,k))
-            c(i,j,k) =  r*c(i,j,k)
-            a(i,j,k) = -r*a(i,j,k)*a(i-1,j,k)
+
+            a0(tj,tk) = a1(tj,tk)
+            c0(tj,tk) = c1(tj,tk)
+            d0(tj,tk) = d1(tj,tk)
+
+            a1(tj,tk) = a(i,j,k)
+            b1(tj,tk) = b(i,j,k)
+            c1(tj,tk) = c(i,j,k)
+            d1(tj,tk) = d(i,j,k)
+
+            r    =    1.d0/(b1(tj,tk)-a1(tj,tk)*c0(tj,tk))
+            d1(tj,tk) =  r*(d1(tj,tk)-a1(tj,tk)*d0(tj,tk))
+            c1(tj,tk) =  r*c1(tj,tk)
+            a1(tj,tk) = -r*a1(tj,tk)*a0(tj,tk)
+
+            a(i,j,k) = a1(tj,tk)
+            c(i,j,k) = c1(tj,tk)
+            d(i,j,k) = d1(tj,tk)
+
         enddo
-    
+
+        ! Construct many reduced tridiagonal systems per each rank. Each process has two rows of reduced systems.
+        a_rd(2,j,k) = a1(tj,tk)
+        b_rd(2,j,k) = 1.d0
+        c_rd(2,j,k) = c1(tj,tk)
+        d_rd(2,j,k) = d1(tj,tk)
+
+        a1(tj,tk) = a0(tj,tk)
+        c1(tj,tk) = c0(tj,tk)
+        d1(tj,tk) = d0(tj,tk)
+
         ! The modified Thomas algorithm : elimination of upper diagonal elements.
         do i=n_row-2, 2, -1
-            d(i,j,k) = d(i,j,k)-c(i,j,k)*d(i+1,j,k)
-            a(i,j,k) = a(i,j,k)-c(i,j,k)*a(i+1,j,k)
-            c(i,j,k) =-c(i,j,k)*c(i+1,j,k)
+
+            a0(tj,tk) = a(i,j,k)
+            c0(tj,tk) = c(i,j,k)
+            d0(tj,tk) = d(i,j,k)
+
+            d0(tj,tk) = d0(tj,tk)-c0(tj,tk)*d1(tj,tk)
+            a0(tj,tk) = a0(tj,tk)-c0(tj,tk)*a1(tj,tk)
+            c0(tj,tk) =-c0(tj,tk)*c1(tj,tk)
+
+            a1(tj,tk) = a0(tj,tk)
+            c1(tj,tk) = c0(tj,tk)
+            d1(tj,tk) = d0(tj,tk)
+
+            a(i,j,k) = a0(tj,tk)
+            c(i,j,k) = c0(tj,tk)
+            d(i,j,k) = d0(tj,tk)
         enddo
 
-        r = 1.d0/(1.d0-a(2,j,k)*c(1,j,k))
-        d(1,j,k) =  r*(d(1,j,k)-c(1,j,k)*d(2,j,k))
-        a(1,j,k) =  r*a(1,j,k)
-        c(1,j,k) = -r*c(1,j,k)*c(2,j,k)
-    
+        a0(tj,tk) = a(1,j,k)
+        c0(tj,tk) = c(1,j,k)
+        d0(tj,tk) = d(1,j,k)
+
+        r = 1.d0/(1.d0-a1(tj,tk)*c0(tj,tk))
+        d0(tj,tk) =  r*(d0(tj,tk)-c0(tj,tk)*d1(tj,tk))
+        a0(tj,tk) =  r*a0(tj,tk)
+        c0(tj,tk) = -r*c0(tj,tk)*c1(tj,tk)
+
+        d(1,j,k) = d0(tj,tk)
+        a(1,j,k) = a0(tj,tk)
+        c(1,j,k) = c0(tj,tk)
+
         ! Construct many reduced tridiagonal systems per each rank. Each process has two rows of reduced systems.
-        a_rd(1,j,k) = a(1,j,k); a_rd(2,j,k) = a(n_row,j,k)
-        b_rd(1,j,k) = 1.d0    ; b_rd(2,j,k) = 1.d0
-        c_rd(1,j,k) = c(1,j,k); c_rd(2,j,k) = c(n_row,j,k)
-        d_rd(1,j,k) = d(1,j,k); d_rd(2,j,k) = d(n_row,j,k)
+        a_rd(1,j,k) = a0(tj,tk)
+        b_rd(1,j,k) = 1.d0
+        c_rd(1,j,k) = c0(tj,tk)
+        d_rd(1,j,k) = d0(tj,tk)
 
     end subroutine PaScaL_TDMA_many_modified_Thomas_cuda
-
-
 
     !>
     !> @brief   Modified Thomas algorithm : Update solution
@@ -522,18 +623,197 @@ module PaScaL_TDMA_cuda
 
         ! Temporary variables for computation
         integer :: i, j, k
+        integer :: tj, tk
+
+        ! Block shared memory
+        double precision, shared :: ds(thread_in_x, thread_in_y), de(thread_in_x, thread_in_y)
 
         j = (blockidx%x-1) * blockdim%x + threadidx%x
         k = (blockidx%y-1) * blockdim%y + threadidx%y
 
+        tj = threadidx%x
+        tk = threadidx%y
+
+        ds(tj, tk) = d_rd(1,j,k)
+        de(tj, tk) = d_rd(2,j,k)
+        call syncthreads()
+
         ! Update solutions of the modified tridiagonal system with the solutions of the reduced tridiagonal system.
-        d(1,j,k) = d_rd(1,j,k)
-        d(n_row,j,k) = d_rd(2,j,k)
+        d(1,j,k)     = ds(tj, tk)
+        d(n_row,j,k) = de(tj, tk)
 
         do i=2,n_row-1
-            d(i,j,k) = d(i,j,k)-a(i,j,k)*d(1,j,k)-c(i,j,k)*d(n_row,j,k)
+            d(i,j,k) = d(i,j,k)-a(i,j,k)*ds(tj, tk)-c(i,j,k)*de(tj, tk)
         enddo
 
     end subroutine PaScaL_TDMA_many_update_solution_cuda
+
+
+    !>
+    !> @brief       Solve many tridiagonal systems of equations using the Thomas algorithm.
+    !>              First index indicates the number of independent many tridiagonal systems to use vectorization.
+    !>              Second index indicates the row number in the tridiagonal system .
+    !> @param       a       Coefficient array in lower diagonal elements
+    !> @param       b       Coefficient array in diagonal elements
+    !> @param       c       Coefficient array in upper diagonal elements
+    !> @param       d       Coefficient array in the right-hand side terms
+    !> @param       n1      Number of rows in each process, size of the tridiagonal matrix N divided by nprocs
+    !>
+    attributes(global) subroutine tdma_many_cuda(a, b, c, d, n1)
+
+        implicit none
+
+        integer, value, intent(in)              :: n1
+        double precision, device, intent(in)    :: a(:,:,:), b(:,:,:)
+        double precision, device, intent(inout) :: c(:,:,:), d(:,:,:)
+        
+        integer :: i, j, k
+        integer :: tj, tk
+        double precision :: r
+
+        double precision, shared :: a1(thread_in_x, thread_in_y)
+        double precision, shared :: b1(thread_in_x, thread_in_y)
+        double precision, shared :: c0(thread_in_x, thread_in_y), c1(thread_in_x, thread_in_y)
+        double precision, shared :: d0(thread_in_x, thread_in_y), d1(thread_in_x, thread_in_y)
+
+        j = (blockidx%x-1) * blockdim%x + threadidx%x
+        k = (blockidx%y-1) * blockdim%y + threadidx%y
+
+        tj = threadidx%x
+        tk = threadidx%y
+
+        b1(tj, tk) = b(1, j, k)
+        c1(tj, tk) = c(1, j, k)
+        d1(tj, tk) = d(1, j, k)
+
+        d1(tj, tk) = d1(tj, tk) / b1(tj, tk)
+        c1(tj, tk) = c1(tj, tk) / b1(tj, tk)
+ 
+        d(1,j,k)=d1(tj, tk)
+        c(1,j,k)=c1(tj, tk)
+
+        do i=2,n1
+            c0(tj, tk) = c1(tj, tk)
+            d0(tj, tk) = d1(tj, tk)
+
+            a1(tj, tk) = a(i, j, k)
+            b1(tj, tk) = b(i, j, k)
+            c1(tj, tk) = c(i, j, k)
+            d1(tj, tk) = d(i, j, k)
+
+            r=1.d0/(b1(tj,tk)-a1(tj,tk)*c0(tj,tk))
+            d1(tj,tk)=r*d1(tj,tk)-a1(tj,tk)*d0(tj,tk)
+            c1(tj,tk)=r*c1(tj,tk)
+
+            d(i,j,k)=d1(tj,tk)
+            c(i,j,k)=c1(tj,tk)
+
+        enddo
+
+        do i=n1-1,1,-1
+            c0(tj,tk) = c(i, j, k)
+            d0(tj,tk) = d(i, j, k)
+            d0(tj,tk) = d0(tj,tk)-c0(tj,tk)*d1(tj,tk)
+            d1(tj,tk) = d0(tj,tk)
+            d(i,j,k)=d0(tj,tk)
+        enddo
+
+    end subroutine tdma_many_cuda
+
+
+
+    !>
+    !> @brief       Solve many cyclic tridiagonal systems of equations using the Thomas algorithm.
+    !>              First index indicates the number of independent many tridiagonal systems to use vectorization.
+    !>              Second index indicates the row number in the tridiagonal system.
+    !> @param       a       Coefficient array in lower diagonal elements
+    !> @param       b       Coefficient array in diagonal elements
+    !> @param       c       Coefficient array in upper diagonal elements
+    !> @param       d       Coefficient array in the right-hand side terms
+    !> @param       n1      Number of rows in each process, size of the tridiagonal matrix N divided by nprocs
+    !>
+    attributes(global) subroutine tdma_cycl_many_cuda(a, b, c, d, n1)
+
+        implicit none
+
+        integer, value, intent(in)              :: n1
+        double precision, device, intent(in)    :: a(:,:,:), b(:,:,:)
+        double precision, device, intent(inout) :: c(:,:,:), d(:,:,:)
+
+        integer :: i, j, k
+        integer :: tj, tk
+        double precision :: e(1:n1)
+        double precision :: r
+
+        double precision, shared :: a1(thread_in_x, thread_in_y)
+        double precision, shared :: b1(thread_in_x, thread_in_y)
+        double precision, shared :: c0(thread_in_x, thread_in_y), c1(thread_in_x, thread_in_y)
+        double precision, shared :: d0(thread_in_x, thread_in_y), d1(thread_in_x, thread_in_y)
+
+        j = (blockidx%x-1) * blockdim%x + threadidx%x
+        k = (blockidx%y-1) * blockdim%y + threadidx%y
+
+        tj = threadidx%x
+        tk = threadidx%y
+
+        do i=1,n1
+            e(i)  = 0.0d0
+        enddo
+        e(2)  = -a(2,j,k)
+        e(n1) = -c(n1,j,k)
+
+        d1(tj,tk) = d(2,j,k)
+        b1(tj,tk) = b(2,j,k)
+        c1(tj,tk) = c(2,j,k)
+
+        d1(tj,tk) = d1(tj,tk) / b1(tj,tk)
+        c1(tj,tk) = c1(tj,tk) / b1(tj,tk)
+
+        d(2,j,k) = d1(tj,tk)
+        e(2)     = e(2) / b1(tj,tk)
+        c(2,j,k) = c1(tj,tk)
+
+        do i=3,n1
+            c0(tj,tk) = c1(tj,tk)
+            d0(tj,tk) = d1(tj,tk)
+
+            a1(tj,tk) = a(i,j,k)
+            b1(tj,tk) = b(i,j,k)
+            c1(tj,tk) = c(i,j,k)
+            d1(tj,tk) = d(i,j,k)
+
+            r        = 1.d0/(b1(tj,tk)-a1(tj,tk)*c0(tj,tk))
+            d1(tj,tk)= r*(d1(tj,tk)-a1(tj,tk)*d0(tj,tk))
+            e(i)     = r*(e(i)-a1(tj,tk)*e(i-1))
+            c1(tj,tk)= r*c1(tj,tk)
+            d(i,j,k) = d1(tj,tk)
+            c(i,j,k) = c1(tj,tk)
+        enddo
+
+        do i=n1-1,2,-1
+
+            c0(tj,tk) = c(i,j,k)
+            d0(tj,tk) = d(i,j,k)
+
+            d0(tj,tk) = d0(tj,tk)-c0(tj,tk)*d1(tj,tk)
+            e(i)      = e(i)-c0(tj,tk)*e(i+1)
+            d1(tj,tk) = d0(tj,tk)
+            d(i,j,k)  = d0(tj,tk)
+
+        enddo
+
+        a1(tj,tk) = a(1,j,k)
+        b1(tj,tk) = b(1,j,k)
+        c1(tj,tk) = c(1,j,k)
+        d1(tj,tk) = d(1,j,k)
+
+        d1(tj,tk) = (d1(tj,tk)-a1(tj,tk)*d(n1,j,k)-c1(tj,tk)*d0(tj,tk))/(b1(tj,tk)+a1(tj,tk)*e(n1)+c1(tj,tk)*e(2))
+        d(1,j,k) = d1(tj,tk)
+
+        do i=2,n1
+            d(i,j,k) = d(i,j,k) + d1(tj,tk)*e(i)
+        enddo
+
+    end subroutine tdma_cycl_many_cuda
 
 end module PaScaL_TDMA_cuda

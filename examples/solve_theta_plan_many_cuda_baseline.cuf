@@ -19,7 +19,7 @@
 !======================================================================================================================
 module solve_theta_cuda
 
-    integer, parameter, private :: BLOCK_DIM_X=4, BLOCK_DIM_Y=4, BLOCK_DIM_Z=4
+    integer, parameter, private :: BLOCK_DIM_X=8, BLOCK_DIM_Y=8, BLOCK_DIM_Z=8
 
 contains
     !>
@@ -227,119 +227,77 @@ contains
         integer, value, intent(in)              :: nx_sub, ny_sub, nz_sub
         double precision, value, intent(in)     :: coefx, coefy, coefz
         integer, device :: jpbc_index_d(0:ny_sub), jmbc_index_d(0:ny_sub)
+        double precision, shared        :: theta_block(*)
 
         ! Loop and index variables
         integer :: i,j,k
-        ! integer :: ip, jp, kp
-        ! integer :: im, jm, km
+        integer :: ip, jp, kp
+        integer :: im, jm, km
         integer :: jem, jep
-        integer :: ti, tj, tk
 
-        ! Temporary memory for theta
-        ! double precision, shared    :: theta_block(0:BLOCK_DIM_X+1, 0:BLOCK_DIM_Y+1, 0:BLOCK_DIM_Z+1)
-        ! double precision, shared    :: thetaBC3_sub_block(BLOCK_DIM_X, BLOCK_DIM_Z), thetaBC4_sub_block(BLOCK_DIM_X, BLOCK_DIM_Z)
+        ! Temporary shared memory
 
         ! Temporary variables for coefficient computations
         double precision :: dedx1, dedx2, dedy3, dedy4, dedz5, dedz6    ! Derivative terms
-        double precision :: viscous                                     ! Viscous terms
+        double precision :: viscous_e1, viscous_e2, viscous_e3, viscous ! Viscous terms
         double precision :: ebc_down, ebc_up, ebc                       ! Boundary terms
         double precision :: eAPI, eAMI, eACI                            ! Diffusion treatment terms in x-direction
         double precision :: eAPJ, eAMJ, eACJ                            ! Diffusion treatment terms in y-direction
         double precision :: eAPK, eAMK, eACK                            ! Diffusion treatment terms in z-direction
         double precision :: eRHS                                        ! From eAPI to eACK
-        double precision :: inv_dmx_sub_i, inv_dmx_sub_ip, inv_dmy_sub_j, inv_dmy_sub_jp, inv_dmz_sub_k, inv_dmz_sub_kp
-        double precision :: thetaijk, thetaip, thetaim, thetajp, thetajm, thetakp, thetakm
-        double precision :: thetaBC3, thetaBC4
 
         i = (blockidx%x-1) * blockdim%x + threadidx%x
         j = (blockidx%y-1) * blockdim%y + threadidx%y
         k = (blockidx%z-1) * blockdim%z + threadidx%z
 
-        ti = threadidx%x
-        tj = threadidx%y
-        tk = threadidx%z
+        ip = i+1
+        im = i-1
 
-        ! theta_block(ti, tj, tk) = theta_d(i, j, k)
+        jp = j+1
+        jm = j-1
 
-        ! if(ti.eq.1) then
-        !     theta_block(ti-1, tj, tk) = theta_d(i-1, j, k)
-        ! else if (ti.eq.blockdim%x) then
-        !     theta_block(ti+1, tj, tk) = theta_d(i+1, j, k)
-        ! endif
-
-        ! if(tj.eq.1) then
-        !     theta_block(ti, tj-1, tk) = theta_d(i, j-1, k)
-        ! else if (tj.eq.blockdim%y) then
-        !     theta_block(ti, tj+1, tk) = theta_d(i, j+1, k)
-        ! endif
-
-        ! if(tj.eq.2) then
-        !     thetaBC3_sub_block(ti,tk) = thetaBC3_sub_d(i,k)
-        !     thetaBC4_sub_block(ti,tk) = thetaBC4_sub_d(i,k)
-        ! endif
-
-        ! if(tk.eq.1) then
-        !     theta_block(ti, tj, tk-1) = theta_d(i, j, k-1)
-        ! else if (tk.eq.blockdim%z) then
-        !     theta_block(ti, tj, tk+1) = theta_d(i, j, k+1)
-        ! endif
-
-        ! call syncthreads()
-
-        thetaijk = theta_d(i,  j,  k)
-        thetaip  = theta_d(i+1,j,  k)
-        thetaim  = theta_d(i-1,j,  k)
-        thetajp  = theta_d(i,  j+1,k)
-        thetajm  = theta_d(i,  j-1,k)
-        thetakp  = theta_d(i,  j,  k+1)
-        thetakm  = theta_d(i,  j,  k-1)
-
-        thetaBC3 = thetaBC3_sub_d(i,k)
-        thetaBC4 = thetaBC4_sub_d(i,k)
-
-        inv_dmx_sub_i  = 1.0d0 / dmx_sub_d(i  )
-        inv_dmx_sub_ip = 1.0d0 / dmx_sub_d(i+1)
-        inv_dmy_sub_j  = 1.0d0 / dmy_sub_d(j  )
-        inv_dmy_sub_jp = 1.0d0 / dmy_sub_d(j+1)
-        inv_dmz_sub_k  = 1.0d0 / dmz_sub_d(k  )
-        inv_dmz_sub_kp = 1.0d0 / dmz_sub_d(k+1)
+        kp = k+1
+        km = k-1
 
         jep = jpbc_index_d(j)
         jem = jmbc_index_d(j)
 
         ! Diffusion term
-        dedx1 = (  thetaijk - thetaim  )*inv_dmx_sub_i
-        dedx2 = (  thetaip  - thetaijk )*inv_dmx_sub_ip
-        dedy3 = (  thetaijk - thetajm  )*inv_dmy_sub_j
-        dedy4 = (  thetajp  - thetaijk )*inv_dmy_sub_jp
-        dedz5 = (  thetaijk - thetakm  )*inv_dmz_sub_k
-        dedz6 = (  thetakp  - thetaijk )*inv_dmz_sub_kp
+        dedx1 = (  theta_d(i ,j ,k ) - theta_d(im,j ,k )  )/dmx_sub_d(i )
+        dedx2 = (  theta_d(ip,j ,k ) - theta_d(i ,j ,k )  )/dmx_sub_d(ip)  
+        dedy3 = (  theta_d(i ,j ,k ) - theta_d(i ,jm,k )  )/dmy_sub_d(j )
+        dedy4 = (  theta_d(i ,jp,k ) - theta_d(i ,j ,k )  )/dmy_sub_d(jp)
+        dedz5 = (  theta_d(i ,j ,k ) - theta_d(i ,j ,km)  )/dmz_sub_d(k )
+        dedz6 = (  theta_d(i ,j ,kp) - theta_d(i ,j ,k )  )/dmz_sub_d(kp)
 
-        viscous = coefx*(dedx2 - dedx1) + coefy*(dedy4 - dedy3) + coefz*(dedz6 - dedz5)
+        viscous_e1 = coefx*(dedx2 - dedx1)
+        viscous_e2 = coefy*(dedy4 - dedy3)
+        viscous_e3 = coefz*(dedz6 - dedz5)
+        viscous = (viscous_e1 + viscous_e2 + viscous_e3)
         
         ! Boundary treatment for the y-direction only
-        ebc_down = coefy*inv_dmy_sub_j *thetaBC3
-        ebc_up   = coefy*inv_dmy_sub_jp*thetaBC4
+        ebc_down = coefy/dmy_sub_d(j)*thetaBC3_sub_d(i,k)
+        ebc_up = coefy/dmy_sub_d(jp)*thetaBC4_sub_d(i,k)
         ebc = dble(1.0d0 - jem)*ebc_down + dble(1. - jep)*ebc_up
 
         ! Diffusion term from incremental notation in next time step: x-direction
-        eAPI = -coefx*inv_dmx_sub_ip
-        eAMI = -coefx*inv_dmx_sub_i
-        eACI =  coefx*( inv_dmx_sub_ip + inv_dmx_sub_i )
+        eAPI = -coefx/dmx_sub_d(ip)
+        eAMI = -coefx/dmx_sub_d(i )
+        eACI =  coefx*( 1.d0/dmx_sub_d(ip) + 1.d0/dmx_sub_d(i) )
 
         ! Diffusion term from incremental notation in next time step: z-direction
-        eAPK = -coefz*inv_dmz_sub_kp
-        eAMK = -coefz*inv_dmz_sub_k
-        eACK =  coefz*( inv_dmz_sub_kp + inv_dmz_sub_k )
+        eAPK = -coefz/dmz_sub_d(kp)
+        eAMK = -coefz/dmz_sub_d(k )
+        eACK =  coefz*( 1.d0/dmz_sub_d(kp) + 1.d0/dmz_sub_d(k) )
 
         ! Diffusion term from incremental notation in next time step: y-direction
-        eAPJ = -coefy*inv_dmy_sub_jp*dble(jep)
-        eAMJ = -coefy*inv_dmy_sub_j *dble(jem)
-        eACJ =  coefy*( inv_dmy_sub_jp + inv_dmy_sub_j )
-
-        eRHS = eAPK*thetakp + eACK*thetaijk + eAMK*thetakm      &
-            & + eAPJ*thetajp + eACJ*thetaijk + eAMJ*thetajm      &
-            & + eAPI*thetaip + eACI*thetaijk + eAMI*thetaim
+        eAPJ = -coefy*( 1.d0/dmy_sub_d(jp) )*dble(jep)
+        eAMJ = -coefy*( 1.d0/dmy_sub_d(j ) )*dble(jem)
+        eACJ =  coefy*( 1.d0/dmy_sub_d(jp) + 1.d0/dmy_sub_d(j) )
+        
+        eRHS = eAPK*theta_d(i,j,kp) + eACK*theta_d(i,j,k) + eAMK*theta_d(i,j,km)      &
+            & + eAPJ*theta_d(i,jp,k) + eACJ*theta_d(i,j,k) + eAMJ*theta_d(i,jm,k)      &
+            & + eAPI*theta_d(ip,j,k) + eACI*theta_d(i,j,k) + eAMI*theta_d(im,j,k)
 
         ! r.h.s. term 
         rhs_d(i,j,k) = viscous + ebc - eRHS
@@ -356,31 +314,19 @@ contains
         double precision, device, intent(in)    :: dmz_sub_d(0:nz_sub)
         integer, value, intent(in)              :: nx_sub, ny_sub, nz_sub
         double precision, value, intent(in)     :: coefz, dt
-
         integer :: i,j,k
-        integer :: ti,tj,tk
-        double precision :: inv_dmz_sub_k, inv_dmz_sub_kp
-        double precision, shared    :: rhs_block(BLOCK_DIM_X+1, BLOCK_DIM_Y, BLOCK_DIM_Z)
+        integer :: kp
 
         i = (blockidx%x-1) * blockdim%x + threadidx%x
         j = (blockidx%y-1) * blockdim%y + threadidx%y
         k = (blockidx%z-1) * blockdim%z + threadidx%z
 
-        ti = threadidx%x
-        tj = threadidx%y
-        tk = threadidx%z
+        kp = k+1
 
-        rhs_block(ti,tj,tk) = rhs_d(i,j,k) * dt
-        call syncthreads()
-
-        inv_dmz_sub_k  = 1.0d0 / dmz_sub_d(k  )
-        inv_dmz_sub_kp = 1.0d0 / dmz_sub_d(k+1)
-
-        ap_d(k,i,j) = -coefz*inv_dmz_sub_kp*dt
-        am_d(k,i,j) = -coefz*inv_dmz_sub_k *dt
-        ac_d(k,i,j) =  coefz*( inv_dmz_sub_kp + inv_dmz_sub_k )*dt + 1.d0
-        ! ad_d(k,i,j) = rhs_d(i,j,k)*dt
-        ad_d(k,i,j) = rhs_block(ti,tj,tk)
+        ap_d(k,i,j) = -coefz/dmz_sub_d(kp)*dt
+        am_d(k,i,j) = -coefz/dmz_sub_d(k )*dt
+        ac_d(k,i,j) =  coefz*( 1.d0/dmz_sub_d(kp) + 1.d0/dmz_sub_d(k) )*dt + 1.d0
+        ad_d(k,i,j) = rhs_d(i,j,k)*dt
 
     end subroutine build_LHSz_cuda
 
@@ -395,35 +341,22 @@ contains
         integer, device, intent(in)             :: jpbc_index_d(0:ny_sub), jmbc_index_d(0:ny_sub)
         integer, value, intent(in)              :: nx_sub, ny_sub, nz_sub
         double precision, value, intent(in)     :: coefy, dt
-
         integer :: i,j,k
-        integer :: ti,tj,tk
-        integer :: jep, jem
-        double precision :: inv_dmy_sub_j, inv_dmy_sub_jp
-        double precision, shared    :: rhs_block(BLOCK_DIM_X+1, BLOCK_DIM_Y, BLOCK_DIM_Z)
+        integer :: jp, jm, jep, jem
 
         i = (blockidx%x-1) * blockdim%x + threadidx%x
         j = (blockidx%y-1) * blockdim%y + threadidx%y
         k = (blockidx%z-1) * blockdim%z + threadidx%z
 
-        ti = threadidx%x
-        tj = threadidx%y
-        tk = threadidx%z
-
-        rhs_block(ti,tj,tk) = rhs_d(i,j,k)
-        call syncthreads()
-
-        inv_dmy_sub_j  = 1.0d0 / dmy_sub_d(j  )
-        inv_dmy_sub_jp = 1.0d0 / dmy_sub_d(j+1)
-
+        jp = j + 1
+        jm = j - 1
         jep = jpbc_index_d(j)
         jem = jmbc_index_d(j)
         
-        ap_d(j,i,k) = -coefy*inv_dmy_sub_jp*dble(jep)*dt
-        am_d(j,i,k) = -coefy*inv_dmy_sub_j *dble(jem)*dt
-        ac_d(j,i,k) =  coefy*( inv_dmy_sub_jp + inv_dmy_sub_j )*dt + 1.d0
-        ! ad_d(j,i,k) = rhs_d(i,j,k)
-        ad_d(j,i,k) = rhs_block(ti,tj,tk)
+        ap_d(j,i,k) = -coefy/dmy_sub_d(jp)*dble(jep)*dt
+        am_d(j,i,k) = -coefy/dmy_sub_d(j )*dble(jem)*dt
+        ac_d(j,i,k) =  coefy*( 1.d0/dmy_sub_d(jp) + 1.d0/dmy_sub_d(j) )*dt + 1.d0
+        ad_d(j,i,k) = rhs_d(i,j,k)
 
     end subroutine build_LHSy_cuda
 
@@ -437,20 +370,19 @@ contains
         double precision, device, intent(in)    :: dmx_sub_d(0:nx_sub)
         integer, value, intent(in)              :: nx_sub, ny_sub, nz_sub
         double precision, value, intent(in)     :: coefx, dt
-
         integer :: i,j,k
-        double precision :: inv_dmx_sub_i, inv_dmx_sub_ip
+        integer :: ip,im
 
         i = (blockidx%x-1) * blockdim%x + threadidx%x
         j = (blockidx%y-1) * blockdim%y + threadidx%y
         k = (blockidx%z-1) * blockdim%z + threadidx%z
 
-        inv_dmx_sub_i  = 1.0d0 / dmx_sub_d(i  )
-        inv_dmx_sub_ip = 1.0d0 / dmx_sub_d(i+1)
+        ip = i+1
+        im = i-1
 
-        ap_d(i,j,k) = -coefx*inv_dmx_sub_ip*dt
-        am_d(i,j,k) = -coefx*inv_dmx_sub_i*dt
-        ac_d(i,j,k) =  coefx*( inv_dmx_sub_ip + inv_dmx_sub_i )*dt + 1.d0
+        ap_d(i,j,k) = -coefx/dmx_sub_d(ip)*dt
+        am_d(i,j,k) = -coefx/dmx_sub_d(i )*dt
+        ac_d(i,j,k) =  coefx*( 1.d0/dmx_sub_d(ip) + 1.d0/dmx_sub_d(i) )*dt + 1.d0
         ad_d(i,j,k) = rhs_d(i,j,k)
 
     end subroutine build_LHSx_cuda

@@ -22,20 +22,20 @@
 !> @brief       Main execution program for the example problem of PaScaL_TDMA.
 !>
 program main
+
     use mpi
     use global
     use mpi_subdomain
     use mpi_topology
     use PaScaL_TDMA_cuda
+    use solve_theta_cuda, only : solve_theta_plan_many_cuda
     
     implicit none
  
-    integer :: time_step        ! Current time step
-    double precision :: t_curr  ! Current simulation time
-
     integer :: nprocs, myrank   ! Number of MPI processes and rank ID in MPI_COMM_WORLD
     integer :: ierr
     double precision, allocatable, dimension(:, :, :) :: theta_sub  ! Main 3-D variable to be solved
+    
     call MPI_Init(ierr)
     call MPI_Comm_size( MPI_COMM_WORLD, nprocs, ierr)
     call MPI_Comm_rank( MPI_COMM_WORLD, myrank, ierr)
@@ -77,19 +77,11 @@ program main
 
     if(myrank==0) write(*,*) '[Main] The preparation for simulation finished! '
 
-    ! Simulation begins
-    t_curr = tStart
-    dt = dtstart
-
     if(myrank==0) write(*,*) '[Main] Solving the 3D heat equation! '
-
-    do time_step = 1, Tmax
-        t_curr = t_curr + dt
-        if(myrank==0) write(*,*) '[Main] Current time step = ', time_step
     
-        call solve_theta_plan_many_cuda(theta_sub)
+    ! call solve_theta_plan_many(theta_sub)
+    call solve_theta_plan_many_cuda(theta_sub)
  
-    end do
     if(myrank==0) write(*,*) '[Main] Solving the 3D heat equation complete! '
 
     ! Write the values of the field variable in an output file if required.
@@ -138,26 +130,26 @@ subroutine field_file_write(myrank, nprocs, theta_sub)
     integer :: i, j, k, ierr
     integer :: status(MPI_STATUS_SIZE)
 
-    ! Singe task IO: each process writes to its own output file.
-    write (filename, '("mpi_Tfield_sub_af",5I1,".PLT" )' ) int(myrank/10000)-int(myrank/100000)*10 &
-                                                                &,int(myrank/1000 )-int(myrank/10000 )*10 &
-                                                                &,int(myrank/100  )-int(myrank/1000  )*10 &
-                                                                &,int(myrank/10   )-int(myrank/100   )*10 &
-                                                                &,int(myrank/1    )-int(myrank/10    )*10 
-    open(unit=myrank,file=filename)
+    ! ! Singe task IO: each process writes to its own output file.
+    ! write (filename, '("mpi_Tfield_sub_af",5I1,".PLT" )' ) int(myrank/10000)-int(myrank/100000)*10 &
+    !                                                             &,int(myrank/1000 )-int(myrank/10000 )*10 &
+    !                                                             &,int(myrank/100  )-int(myrank/1000  )*10 &
+    !                                                             &,int(myrank/10   )-int(myrank/100   )*10 &
+    !                                                             &,int(myrank/1    )-int(myrank/10    )*10 
+    ! open(unit=myrank,file=filename)
     
-    write(myrank,*) 'VARIABLES="X","Y","Z","THETA"'
-    write(myrank,*) 'zone t="',1,'"','i=',nx_sub+1,'j=',ny_sub+1,'k=',nz_sub+1
+    ! write(myrank,*) 'VARIABLES="X","Y","Z","THETA"'
+    ! write(myrank,*) 'zone t="',1,'"','i=',nx_sub+1,'j=',ny_sub+1,'k=',nz_sub+1
 
-    do k=1,nz_sub-1
-        do j=1,ny_sub-1
-            do i=1,nx_sub-1
-                write(myrank,'(3D20.10,1D30.20)') X_sub(i), Y_sub(j), Z_sub(k), theta_sub(i,j,k)
-            enddo
-        enddo
-    enddo
+    ! do k=1,nz_sub-1
+    !     do j=1,ny_sub-1
+    !         do i=1,nx_sub-1
+    !             write(myrank,'(3D14.6,1E22.14)') X_sub(i), Y_sub(j), Z_sub(k), theta_sub(i,j,k)
+    !         enddo
+    !     enddo
+    ! enddo
 
-    close(myrank)
+    ! close(myrank)
 
     ! Single file IO - process 0 gathers all results from other variables by using derived datatypes.
     allocate(nxm_sub_cnt(0:comm_1d_x%nprocs-1), nxm_sub_disp(0:comm_1d_x%nprocs-1))
@@ -238,7 +230,7 @@ subroutine field_file_write(myrank, nprocs, theta_sub)
         do k = 1, nzm
             do j = 1, nym
                 do i = 1, nxm
-                    write(myrank,'(3D20.10,1E30.20)') dx*dble(i-1),dy*dble(j-1),dz*dble(k-1),theta_all(i,j,k)
+                    write(myrank,'(3D14.6,1E22.14)') dx*dble(i-1),dy*dble(j-1),dz*dble(k-1),theta_all(i,j,k)
                 enddo
             enddo
         enddo
