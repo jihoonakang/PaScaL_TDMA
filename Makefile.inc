@@ -10,6 +10,7 @@ FC = mpifort
 # For optimized run in Intel Xeon Phi
 #FLAG = -O3 -fPIC -fp-model=precise -xMIC-AVX512
 
-#FLAG = -O2 -fPIC -fp-model=precise -xCORE-AVX512 -fopenmp -check all
-FLAG = -fast -fPIC -fopenmp -Mcuda
+#FLAG = -O2 -fPIC -fp-model=precise -xCORE-AVX512 -fopenmp
+#FLAG = -fast -fPIC -mp:multicore -Mcuda
+FLAG = -fast -fPIC -mp:multicore 
 

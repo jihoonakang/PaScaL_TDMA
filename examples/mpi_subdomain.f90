@@ -127,7 +127,7 @@ module mpi_subdomain
     subroutine mpi_subdomain_make_ghostcell_ddtype
 
         implicit none
-        integer :: sizes(0:2), subsizes(0:2), starts(0:2), ierr     ! Local variables for MPI_Type_create_subarray
+        integer :: sizes(0:2), subsizes(0:2), starts(0:2)     ! Local variables for MPI_Type_create_subarray
 
         ! ddtype sending data to east MPI process (x+ neighbor)
         sizes    = (/nx_sub+1,ny_sub+1,nz_sub+1/)
@@ -223,7 +223,6 @@ module mpi_subdomain
         type(cart_comm_1d), intent(in)  :: comm_1d_x, comm_1d_y, comm_1d_z
         double precision, dimension(0:nx_sub, 0:ny_sub, 0:nz_sub), intent(inout) :: theta_sub
 
-        integer :: ierr
         integer :: request(12)
 
         ! Update the ghostcells in the x-direction using derived datatypes and subcommunicator.
@@ -346,7 +345,6 @@ module mpi_subdomain
         integer, intent(in) :: myrank_in_y, nprocs_in_y
         double precision, intent(inout) :: theta_sub(0:nx_sub, 0:ny_sub, 0:nz_sub)
     
-        double precision, parameter :: PI = acos(-1.d0)
         integer :: i,j,k
 
         ! Initialize the main variable with a sine function and linearly changed values between the wall boundaries.

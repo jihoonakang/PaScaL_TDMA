@@ -196,7 +196,7 @@ subroutine solve_theta_plan_many(theta)
         call PaScaL_TDMA_plan_many_destroy(py_many,comm_1d_y%nprocs)
         deallocate( ap, am, ac, ad )
 
-        ! solve in the y-direction.
+        ! solve in the x-direction.
         allocate( ap(1:ny_sub-1, 1:nx_sub-1), am(1:ny_sub-1, 1:nx_sub-1), ac(1:ny_sub-1, 1:nx_sub-1), ad(1:ny_sub-1, 1:nx_sub-1) )
 
         ! Create a PaScaL_TDMA plan for the tridiagonal systems.

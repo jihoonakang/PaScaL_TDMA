@@ -3,6 +3,7 @@ include Makefile.inc
 
 lib:
 	mkdir -p include;mkdir -p lib
+	cd timer; mkdir -p obj; make all
 	cd src; mkdir -p obj; make all
 
 example:
@@ -10,9 +11,11 @@ example:
 
 all:
 	mkdir -p include; mkdir -p lib
+	cd timer; mkdir -p obj; make all
 	cd src; mkdir -p obj; make all
 	cd examples; make all
 
 clean:
+	cd timer; make clean
 	cd src; make clean
 	cd examples; make clean
